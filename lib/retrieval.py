@@ -5,10 +5,21 @@ DEFAULT_TOP_K = 3
 
 def get_chroma_collection(path=CHROMA_PATH, collection_name=COLLECTION_NAME):
     """Return a persistent Chroma collection for manual local testing."""
-    # TODO: Import chromadb inside this function.
-    # TODO: Create a PersistentClient using path.
-    # TODO: Return get_or_create_collection(collection_name).
-    raise NotImplementedError("Implement get_chroma_collection().")
+    import chromadb 
+
+    client = chromadb.PersistentClient(path=path)
+    return client.get_or_create_collection(collection_name)
+
+
+def _first_list(results, key):
+    """Chroma nests each field one level deep (one list per query).
+
+    Return the inner list for the first query, or [] if it is missing.
+    """
+    value = (results or {}).get(key)
+    if not value:
+        return []
+    return value[0] or []
 
 
 def format_chroma_results(results):
@@ -22,11 +33,31 @@ def format_chroma_results(results):
             "distances": [[0.12]]
         }
     """
-    # TODO: Handle nested Chroma result lists.
-    # TODO: Skip missing or blank documents.
-    # TODO: Return dictionaries with id, text, source_id, title, category,
-    #       section, and distance keys.
-    raise NotImplementedError("Implement format_chroma_results().")
+    ids = _first_list(results, "ids")
+    documents = _first_list(results, "documents")
+    metadatas = _first_list(results, "metadatas")
+    distances = _first_list(results, "distances")
+
+    chunks = []
+    for index, document in enumerate(documents):
+        if not isinstance(document, str) or not document.strip():
+            continue
+
+        metadata = (metadatas[index] if index < len(metadatas) else None) or {}
+
+        chunks.append(
+            {
+                "id": ids[index] if index < len(ids) else None,
+                "text": document.strip(),
+                "source_id": metadata.get("source_id"),
+                "title": metadata.get("title"),
+                "category": metadata.get("category"),
+                "section": metadata.get("section"),
+                "distance": distances[index] if index < len(distances) else None,
+            }
+        )
+
+    return chunks
 
 
 def retrieve_context(question, collection=None, top_k=DEFAULT_TOP_K):
@@ -34,8 +65,15 @@ def retrieve_context(question, collection=None, top_k=DEFAULT_TOP_K):
 
     Tests may pass a fake collection. Manual use should call Chroma.
     """
-    # TODO: Strip the question.
-    # TODO: Use the provided collection or get_chroma_collection().
-    # TODO: Call collection.query() with query_texts, n_results, and include.
-    # TODO: Return normalized context chunks.
-    raise NotImplementedError("Implement retrieve_context().")
+    if not isinstance(question, str) or not question.strip():
+        return []
+
+    if collection is None:
+        collection = get_chroma_collection()
+
+    results = collection.query(
+        query_texts=[question.strip()],
+        n_results=top_k,
+        include=["documents", "metadatas", "distances"],
+    )
+    return format_chroma_results(results)
